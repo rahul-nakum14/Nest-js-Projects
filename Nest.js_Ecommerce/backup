@@ -1,0 +1,178 @@
+-------------For create------------------------------------
+
+async create(
+    createCart: createcartInterfaces,
+    user: any,
+  ): Promise<{ msg: string; cart: Cart }> {
+    // Initial log to check user context
+    console.log('Received user object:', user);
+
+    const productExists = await this.productRepository.findOne({
+      where: { id: createCart.product_id },
+    });
+
+    if (!productExists) {
+      throw new NotFoundException('Product does not exist');
+    }
+
+    // Log the expected user ID
+    console.log('Looking for cart with user ID:', user.userId);
+
+    // Query the cart associated with the user
+    const cart = await this.cartRepository.findOne({
+      where: { user: { id: user.userId } },
+      relations: ['user'],
+    });
+
+    // Debugging logs for cart retrieval
+    console.log('Queried cart:', cart);
+    if (cart) {
+      console.log('Cart user ID:', cart.user.id);
+    } else {
+      console.log('No cart found for user ID:', user.userId);
+    }
+    console.log('Expected user ID:', user.userId);
+
+    if (!cart) {
+      // Create a new cart if none exists
+      const newCart = new Cart({
+        product_id: [productExists.id],
+        quantity: createCart.quantity,
+        price: productExists.product_price,
+        user: user.userId,
+      });
+      console.log('Creating new cart:', newCart);
+
+      await this.cartRepository.save(newCart);
+      return { msg: 'Added To cart', cart: newCart };
+    } else {
+      // Update the existing cart if it exists
+      console.log('Updating existing cart for user ID:', user.userId);
+
+      cart.product_id.push(productExists.id);
+      cart.quantity += createCart.quantity;
+      cart.price += productExists.product_price * createCart.quantity;
+
+      await this.cartRepository.save(cart);
+      return { msg: 'Updated', cart: cart };
+    }
+  }
+
+
+
+-------------For Remove ------------------------------------
+
+
+  async remove(
+    id: number,
+    itemToDelete: number,
+  ): Promise<{ msg: string; cart?: Cart }> {
+    const cartExists = await this.cartRepository.findOne({
+      where: { id: id },
+    });
+
+    const productPrice = await this.productRepository.findOne({
+      where: { id: itemToDelete },
+    });
+
+    if (!cartExists) {
+      throw new NotFoundException('Cart does not exist');
+    }
+
+    const index = cartExists.product_id.indexOf(itemToDelete);
+
+    if (index > -1) {
+      cartExists.product_id.splice(index, 1);
+    } else {
+      throw new NotFoundException('Product does not exist in the cart');
+    }
+
+    // for (const [index, productId] of cartExists.product_id.entries()) {
+    //   console.log('this is productId', productId);
+    //   console.log('this is productId', itemToDelete);
+    //   if (productId === itemToDelete) {
+    //     itemFound = true;
+    //     cartExists.product_id.splice(index, 1);
+    //     // await this.productRepository.delete(itemToDelete);
+    //     break;
+    //   }
+    // }
+
+    cartExists.price = cartExists.price - productPrice.product_price;
+    cartExists.quantity -= 1;
+    // if (!itemFound) {
+    //   throw new NotFoundException('Product not found in cart');
+    // }
+
+    await this.cartRepository.save(cartExists);
+
+    return { msg: 'Deleted', cart: cartExists };
+  }
+
+
+
+
+
+  /** Working code for creating cart */
+  // async create(createCart: createcartInterfaces, user: any): Promise<Cart> {
+  //   console.log(createCart);
+  //   const newCart = this.cartRepository.create({
+  //     ...createCart,
+  //     user: user.userId,
+  //   });
+  //   console.log('this is new cart', newCart);
+  //   return await this.cartRepository.save(newCart);
+  // }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Role-guard.ts
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { Role } from '../enums/role.enum';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    console.log('Required roles:', requiredRoles);
+
+    if (!requiredRoles) {
+      console.log('No roles required, granting access');
+      return true;
+    }
+
+    const { user } = context.switchToHttp().getRequest();
+
+    console.log('User object:', user);
+    console.log('User roles:', user.role);
+
+    if (!user || !user.role) {
+      console.log('No user or roles found, denying access');
+      return false;
+    }
+
+    const hasRole = requiredRoles.some((role) => user.role.includes(role));
+    // console.log('User has required role:', hasRole);
+
+    return hasRole;
+  }
+}
